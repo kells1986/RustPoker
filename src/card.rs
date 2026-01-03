@@ -26,7 +26,8 @@ impl FromStr for Suit {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumIter, Hash)]
 pub enum Rank {
     Two,
     Three,
@@ -41,6 +42,35 @@ pub enum Rank {
     Queen,
     King,
     Ace,
+}
+
+impl Rank {
+    pub fn value(self) -> u8 {
+        (self as u8) + 2
+    }
+}
+
+impl TryFrom<u8> for Rank {
+    type Error = String;
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        Ok(match v {
+            2 => Rank::Two,
+            3 => Rank::Three,
+            4 => Rank::Four,
+            5 => Rank::Five,
+            6 => Rank::Six,
+            7 => Rank::Seven,
+            8 => Rank::Eight,
+            9 => Rank::Nine,
+            10 => Rank::Ten,
+            11 => Rank::Jack,
+            12 => Rank::Queen,
+            13 => Rank::King,
+            14 => Rank::Ace,
+            _ => return Err(format!("Invalid rank value: {v}")),
+        })
+    }
 }
 
 impl FromStr for Rank {
@@ -91,7 +121,7 @@ impl FromStr for Rank {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Card {
     pub rank: Rank,
     pub suit: Suit,

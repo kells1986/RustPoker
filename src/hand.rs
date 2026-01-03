@@ -19,6 +19,10 @@ impl Hand {
         self.hole_cards.push(card);
     }
 
+    pub fn hole_cards(&self) -> &[Card] {
+        &self.hole_cards
+    }
+
     pub fn add_community_card(&mut self, card: Card) {
         self.community_cards.push(card);
     }

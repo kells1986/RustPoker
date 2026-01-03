@@ -1,0 +1,15 @@
+# Rust / Cargo
+/target/
+
+# Backup files
+**/*.rs.bk
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo

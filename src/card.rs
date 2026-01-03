@@ -1,6 +1,7 @@
 use std::str::FromStr;
+use strum_macros::EnumIter;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
 pub enum Suit {
     Hearts,
     Diamonds,
@@ -25,7 +26,7 @@ impl FromStr for Suit {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
 pub enum Rank {
     Two,
     Three,

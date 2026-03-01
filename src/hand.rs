@@ -16,6 +16,10 @@ impl Hand {
     }
 
     pub fn add_hole_card(&mut self, card: Card) {
+        assert!(
+            self.hole_cards.len() < 2,
+            "Texas Hold'em hand can only hold 2 hole cards"
+        );
         self.hole_cards.push(card);
     }
 
@@ -24,16 +28,24 @@ impl Hand {
     }
 
     pub fn add_community_card(&mut self, card: Card) {
+        assert!(
+            self.community_cards.len() < 5,
+            "Texas Hold'em hand can only hold 5 community cards"
+        );
         self.community_cards.push(card);
     }
-}
 
-impl Hand {
     pub fn best_hand(&self) -> EvaluatedHand {
         let mut all = Vec::with_capacity(self.hole_cards.len() + self.community_cards.len());
         all.extend_from_slice(&self.hole_cards);
         all.extend_from_slice(&self.community_cards);
         evaluate_best(&all)
+    }
+}
+
+impl Default for Hand {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -59,7 +71,6 @@ pub struct EvaluatedHand {
 
 impl Ord for EvaluatedHand {
     fn cmp(&self, other: &Self) -> Ordering {
-        // Primary: category; Secondary: tie-break ranks
         self.category
             .cmp(&other.category)
             .then_with(|| self.ranks.cmp(&other.ranks))
@@ -84,22 +95,17 @@ pub fn evaluate_best(cards: &[Card]) -> EvaluatedHand {
         let eval = evaluate_five(combo);
         best = Some(match best {
             None => eval,
-            Some(b) => b.max(eval),
+            Some(current_best) => current_best.max(eval),
         });
     }
 
-    best.unwrap()
+    best.expect("At least one 5-card combination is guaranteed")
 }
 
-// ---------- 5-card evaluator (the core) ----------
-
 fn evaluate_five(mut cards: [Card; 5]) -> EvaluatedHand {
-    // Sort cards by rank descending (helps with kickers / output cards).
-    cards.sort_by(|a, b| b.rank.cmp(&a.rank));
+    cards.sort_unstable_by(|a, b| b.rank.cmp(&a.rank));
 
     let is_flush = cards.iter().all(|c| c.suit == cards[0].suit);
-
-    // Collect ranks sorted descending
     let ranks = [
         cards[0].rank,
         cards[1].rank,
@@ -108,85 +114,65 @@ fn evaluate_five(mut cards: [Card; 5]) -> EvaluatedHand {
         cards[4].rank,
     ];
 
-    // Straight detection should use unique ranks.
     let (is_straight, straight_high) = straight_high_rank(&ranks);
 
-    // Build frequency table for ranks (5 cards => tiny; just do a vec and sort)
-    // We'll compute groups: Vec<(count, rank)> sorted by (count desc, rank desc)
     let mut groups: Vec<(u8, Rank)> = Vec::with_capacity(5);
-    for &r in &ranks {
-        if let Some(pos) = groups.iter().position(|&(_, rr)| rr == r) {
+    for &rank in &ranks {
+        if let Some(pos) = groups.iter().position(|&(_, r)| r == rank) {
             groups[pos].0 += 1;
         } else {
-            groups.push((1, r));
+            groups.push((1, rank));
         }
     }
-    groups.sort_by(|(ca, ra), (cb, rb)| cb.cmp(ca).then_with(|| rb.cmp(ra)));
+    groups.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
 
-    // Helper to expand groups into tie-break rank list:
-    // e.g. for one-pair: [(2, K), (1, A), (1, 9), (1, 3)] => [K, A, 9, 3, ...]
-    let mut tiebreak: Vec<Rank> = Vec::with_capacity(5);
-    for (count, r) in &groups {
-        for _ in 0..*count {
-            tiebreak.push(*r);
-        }
-    }
-
-    // Now assign category + exact tie-break ordering rules.
-    let category;
-    let mut key = [Rank::Two; 5];
-
-    if is_straight && is_flush {
-        category = HandCategory::StraightFlush;
-        key = [straight_high, Rank::Two, Rank::Two, Rank::Two, Rank::Two];
+    let (category, key) = if is_straight && is_flush {
+        (
+            HandCategory::StraightFlush,
+            [straight_high, Rank::Two, Rank::Two, Rank::Two, Rank::Two],
+        )
     } else if groups[0].0 == 4 {
-        // Quads: [quad_rank, kicker, ...]
-        category = HandCategory::Quads;
-        let quad = groups[0].1;
-        let kicker = groups[1].1;
-        key = [quad, kicker, Rank::Two, Rank::Two, Rank::Two];
+        (
+            HandCategory::Quads,
+            [groups[0].1, groups[1].1, Rank::Two, Rank::Two, Rank::Two],
+        )
     } else if groups[0].0 == 3 && groups.len() == 2 {
-        // Full house: [trips_rank, pair_rank, ...]
-        category = HandCategory::FullHouse;
-        key = [groups[0].1, groups[1].1, Rank::Two, Rank::Two, Rank::Two];
+        (
+            HandCategory::FullHouse,
+            [groups[0].1, groups[1].1, Rank::Two, Rank::Two, Rank::Two],
+        )
     } else if is_flush {
-        // Flush: ranks descending
-        category = HandCategory::Flush;
-        key = ranks;
+        (HandCategory::Flush, ranks)
     } else if is_straight {
-        category = HandCategory::Straight;
-        key = [straight_high, Rank::Two, Rank::Two, Rank::Two, Rank::Two];
+        (
+            HandCategory::Straight,
+            [straight_high, Rank::Two, Rank::Two, Rank::Two, Rank::Two],
+        )
     } else if groups[0].0 == 3 {
-        // Trips: [trips, kicker1, kicker2, ...]
-        category = HandCategory::Trips;
-        // groups sorted by count desc then rank desc => trips first, then kickers
-        let trips = groups[0].1;
         let mut kickers: Vec<Rank> = groups[1..].iter().map(|&(_, r)| r).collect();
-        kickers.sort_by(|a, b| b.cmp(a));
-        key = [trips, kickers[0], kickers[1], Rank::Two, Rank::Two];
+        kickers.sort_unstable_by(|a, b| b.cmp(a));
+        (
+            HandCategory::Trips,
+            [groups[0].1, kickers[0], kickers[1], Rank::Two, Rank::Two],
+        )
     } else if groups[0].0 == 2 && groups[1].0 == 2 {
-        // Two pair: [high_pair, low_pair, kicker, ...]
-        category = HandCategory::TwoPair;
-        let p1 = groups[0].1;
-        let p2 = groups[1].1;
-        let (hi, lo) = if p1 > p2 { (p1, p2) } else { (p2, p1) };
-        let kicker = groups[2].1;
-        key = [hi, lo, kicker, Rank::Two, Rank::Two];
+        let pair_high = groups[0].1.max(groups[1].1);
+        let pair_low = groups[0].1.min(groups[1].1);
+        (
+            HandCategory::TwoPair,
+            [pair_high, pair_low, groups[2].1, Rank::Two, Rank::Two],
+        )
     } else if groups[0].0 == 2 {
-        // One pair: [pair, kicker1, kicker2, kicker3, ...]
-        category = HandCategory::OnePair;
-        let pair = groups[0].1;
         let mut kickers: Vec<Rank> = groups[1..].iter().map(|&(_, r)| r).collect();
-        kickers.sort_by(|a, b| b.cmp(a));
-        key = [pair, kickers[0], kickers[1], kickers[2], Rank::Two];
+        kickers.sort_unstable_by(|a, b| b.cmp(a));
+        (
+            HandCategory::OnePair,
+            [groups[0].1, kickers[0], kickers[1], kickers[2], Rank::Two],
+        )
     } else {
-        // High card
-        category = HandCategory::HighCard;
-        key = ranks;
-    }
+        (HandCategory::HighCard, ranks)
+    };
 
-    // If you care about returning the 5 chosen cards in canonical order (e.g. for straights),
-    // you can reorder here. For now we return them rank-desc sorted.
     EvaluatedHand {
         category,
         ranks: key,
@@ -194,57 +180,38 @@ fn evaluate_five(mut cards: [Card; 5]) -> EvaluatedHand {
     }
 }
 
-/// Given 5 ranks in descending order (may contain duplicates),
-/// detect straight and return (is_straight, high_rank).
-///
-/// Handles the wheel: A-2-3-4-5 => high_rank = Five.
 fn straight_high_rank(ranks_desc: &[Rank; 5]) -> (bool, Rank) {
-    // Make unique ranks descending
-    let mut uniq: Vec<Rank> = Vec::with_capacity(5);
-    for &r in ranks_desc.iter() {
-        if !uniq.contains(&r) {
-            uniq.push(r);
+    let mut unique_ranks: Vec<Rank> = Vec::with_capacity(5);
+    for &rank in ranks_desc {
+        if !unique_ranks.contains(&rank) {
+            unique_ranks.push(rank);
         }
     }
-    if uniq.len() != 5 {
+    if unique_ranks.len() != 5 {
         return (false, Rank::Two);
     }
 
-    // Convert to numeric values (2..14)
-    let mut vals: Vec<u8> = uniq.iter().map(|&r| rank_value(r)).collect();
-    vals.sort_by(|a, b| b.cmp(a));
+    let mut values: Vec<u8> = unique_ranks.iter().map(|&rank| rank.value()).collect();
+    values.sort_unstable_by(|a, b| b.cmp(a));
 
-    // Normal straight: v0, v0-1, v0-2, v0-3, v0-4
-    let v0 = vals[0];
-    let is_normal = vals
+    let first = values[0];
+    let is_regular_straight = values
         .iter()
         .enumerate()
-        .all(|(i, &v)| v == v0.saturating_sub(i as u8));
-
-    if is_normal {
-        return (true, value_to_rank(v0).unwrap());
+        .all(|(idx, &value)| value == first.saturating_sub(idx as u8));
+    if is_regular_straight {
+        return (
+            true,
+            Rank::try_from(first).expect("Straight high card must map to a valid rank"),
+        );
     }
 
-    // Wheel: A,5,4,3,2 => values are [14,5,4,3,2]
-    let is_wheel = vals == vec![14, 5, 4, 3, 2];
-    if is_wheel {
+    if values.as_slice() == [14, 5, 4, 3, 2] {
         return (true, Rank::Five);
     }
 
     (false, Rank::Two)
 }
-
-// Map Rank <-> numeric for straight logic and tie-breaks.
-// Adapt these to your Rank enum ordering if needed.
-fn rank_value(r: Rank) -> u8 {
-    r.value()
-}
-
-fn value_to_rank(v: u8) -> Option<Rank> {
-    Rank::try_from(v).ok()
-}
-
-// ---------- 5-card combination generator for up to 7 cards ----------
 
 fn combinations_5(cards: &[Card]) -> impl Iterator<Item = [Card; 5]> + '_ {
     let n = cards.len();
@@ -257,4 +224,111 @@ fn combinations_5(cards: &[Card]) -> impl Iterator<Item = [Card; 5]> + '_ {
             })
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Hand, HandCategory, evaluate_best};
+    use crate::card::{Card, Rank, Suit};
+
+    fn card(rank: Rank, suit: Suit) -> Card {
+        Card::new(rank, suit)
+    }
+
+    #[test]
+    fn wheel_straight_uses_five_as_high_card() {
+        let cards = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::Five, Suit::Hearts),
+            card(Rank::Four, Suit::Clubs),
+            card(Rank::Three, Suit::Diamonds),
+            card(Rank::Two, Suit::Spades),
+        ];
+        let evaluated = evaluate_best(&cards);
+
+        assert_eq!(evaluated.category, HandCategory::Straight);
+        assert_eq!(evaluated.ranks[0], Rank::Five);
+    }
+
+    #[test]
+    fn one_pair_tie_breaker_uses_kickers() {
+        let stronger = evaluate_best(&[
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::Ace, Suit::Hearts),
+            card(Rank::King, Suit::Clubs),
+            card(Rank::Queen, Suit::Diamonds),
+            card(Rank::Jack, Suit::Spades),
+        ]);
+        let weaker = evaluate_best(&[
+            card(Rank::Ace, Suit::Clubs),
+            card(Rank::Ace, Suit::Diamonds),
+            card(Rank::King, Suit::Hearts),
+            card(Rank::Queen, Suit::Clubs),
+            card(Rank::Ten, Suit::Spades),
+        ]);
+
+        assert!(stronger > weaker);
+    }
+
+    #[test]
+    fn evaluate_best_selects_best_five_from_seven_cards() {
+        let evaluated = evaluate_best(&[
+            card(Rank::Ace, Suit::Hearts),
+            card(Rank::King, Suit::Hearts),
+            card(Rank::Queen, Suit::Hearts),
+            card(Rank::Jack, Suit::Hearts),
+            card(Rank::Two, Suit::Hearts),
+            card(Rank::Nine, Suit::Clubs),
+            card(Rank::Eight, Suit::Diamonds),
+        ]);
+
+        assert_eq!(evaluated.category, HandCategory::Flush);
+        assert_eq!(evaluated.ranks[0], Rank::Ace);
+    }
+
+    #[test]
+    fn board_play_results_in_tie() {
+        let board = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::King, Suit::Hearts),
+            card(Rank::Queen, Suit::Diamonds),
+            card(Rank::Jack, Suit::Clubs),
+            card(Rank::Ten, Suit::Spades),
+        ];
+
+        let player_one = evaluate_best(&[
+            card(Rank::Two, Suit::Hearts),
+            card(Rank::Three, Suit::Hearts),
+            board[0],
+            board[1],
+            board[2],
+            board[3],
+            board[4],
+        ]);
+        let player_two = evaluate_best(&[
+            card(Rank::Four, Suit::Hearts),
+            card(Rank::Five, Suit::Hearts),
+            board[0],
+            board[1],
+            board[2],
+            board[3],
+            board[4],
+        ]);
+
+        assert_eq!(player_one, player_two);
+    }
+
+    #[test]
+    fn hand_limits_hole_and_community_cards() {
+        let mut hand = Hand::new();
+        hand.add_hole_card(card(Rank::Ace, Suit::Spades));
+        hand.add_hole_card(card(Rank::King, Suit::Spades));
+        hand.add_community_card(card(Rank::Two, Suit::Spades));
+        hand.add_community_card(card(Rank::Three, Suit::Spades));
+        hand.add_community_card(card(Rank::Four, Suit::Spades));
+        hand.add_community_card(card(Rank::Five, Suit::Spades));
+        hand.add_community_card(card(Rank::Six, Suit::Spades));
+
+        assert_eq!(hand.best_hand().category, HandCategory::StraightFlush);
+    }
 }

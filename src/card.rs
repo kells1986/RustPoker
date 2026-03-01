@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use strum_macros::EnumIter;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, Hash)]
 pub enum Suit {
     Hearts,
     Diamonds,
@@ -121,7 +121,7 @@ impl FromStr for Rank {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Card {
     pub rank: Rank,
     pub suit: Suit,
@@ -140,5 +140,30 @@ impl TryFrom<(String, String)> for Card {
         let rank: Rank = value.0.parse()?;
         let suit: Suit = value.1.parse()?;
         Ok(Self { rank, suit })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Card, Rank, Suit};
+
+    #[test]
+    fn parses_rank_and_suit_aliases() {
+        assert_eq!("a".parse::<Rank>(), Ok(Rank::Ace));
+        assert_eq!("10".parse::<Rank>(), Ok(Rank::Ten));
+        assert_eq!("h".parse::<Suit>(), Ok(Suit::Hearts));
+        assert_eq!("clubs".parse::<Suit>(), Ok(Suit::Clubs));
+    }
+
+    #[test]
+    fn card_try_from_strings() {
+        let card = Card::try_from((String::from("k"), String::from("s")));
+        assert_eq!(
+            card,
+            Ok(Card {
+                rank: Rank::King,
+                suit: Suit::Spades,
+            })
+        );
     }
 }
